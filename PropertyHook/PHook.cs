@@ -295,20 +295,80 @@ namespace PropertyHook
             IntPtr curr = begin;
             Kernel32.MEMORY_BASIC_INFORMATION mbi = new Kernel32.MEMORY_BASIC_INFORMATION();
 
-            while (Kernel32.VirtualQueryEx(Handle, curr, out mbi, (IntPtr)Marshal.SizeOf(mbi)) != 0)
+            for (; curr.ToInt64() < end.ToInt64(); curr = new IntPtr(curr.ToInt64() + 0x1000))// + mbi.RegionSize.ToInt64()))
             {
+                Kernel32.VirtualQueryEx(Handle, curr, out mbi, (IntPtr)Marshal.SizeOf(mbi));
                 if (mbi.State == Kernel32.MEM_FREE)
                 {
-                    IntPtr addr = Kernel32.VirtualAllocEx(Handle, mbi.AllocationBase, size, Kernel32.MEM_COMMIT | Kernel32.MEM_RESERVE, flprotect);
+                    IntPtr addr = Kernel32.VirtualAllocEx(Handle, mbi.BaseAddress, size, Kernel32.MEM_COMMIT | Kernel32.MEM_RESERVE, flprotect);
                     if (addr != IntPtr.Zero)
                         return addr;
                 }
-                curr = new IntPtr(curr.ToInt64() + mbi.RegionSize.ToInt64());
-                if (curr.ToInt64() > end.ToInt64())
-                    break;
             }
+            /*
+                while (Kernel32.VirtualQueryEx(Handle, curr, out mbi, (IntPtr)Marshal.SizeOf(mbi)) != 0)
+                {
+                    if (mbi.State == Kernel32.MEM_FREE)
+                    {
+                        IntPtr addr = Kernel32.VirtualAllocEx(Handle, mbi.BaseAddress, size, Kernel32.MEM_COMMIT | Kernel32.MEM_RESERVE, flprotect);
+                        if (addr != IntPtr.Zero)
+                            return addr;
+                    }
+                    curr = new IntPtr(curr.ToInt64() + mbi.RegionSize.ToInt64());
+                    if (curr.ToInt64() > end.ToInt64())
+                        break;
+                }
+            */
 
             return IntPtr.Zero;
+        }
+
+        /// <summary>
+        /// Writes hook with jump instruction to asm bytes.
+        /// Returns a IntPtr to the memory allocated for the asm bytes.
+        /// </summary>
+        public IntPtr InjectHook(byte[] asm, IntPtr hookAddress, int asmJmpByte)
+        {
+            return InjectHook(asm, hookAddress, asmJmpByte, (IntPtr)asm.Length);
+        }
+
+        /// <summary>
+        /// Writes hook with jump instruction to asm bytes.
+        /// Returns a IntPtr to the memory allocated for the asm bytes.
+        /// </summary>
+        public IntPtr InjectHook(byte[] asm, IntPtr hookAddress, int asmJmpByte, IntPtr size)
+        {
+            IntPtr newmem = AllocateNearbyMemory(hookAddress, size, Kernel32.PAGE_EXECUTE_READWRITE);
+            if (newmem == IntPtr.Zero)
+                return IntPtr.Zero;
+
+            // calculate address for relative jump
+            byte[] newmemJmpBytes = BitConverter.GetBytes(newmem.ToInt64() - hookAddress.ToInt64() - 5);
+
+            byte[] hook = { 0xE9, 0x90, 0x90, 0x90, 0x90, 0x90 };
+            Array.Copy(newmemJmpBytes, 0, hook, 0x1, 4);
+
+            // calculate return jump
+            byte[] hookAddrJmpBytes = BitConverter.GetBytes(hookAddress.ToInt64() - newmem.ToInt64() - asmJmpByte);
+            Array.Copy(hookAddrJmpBytes, 0, asm, asmJmpByte + 1, 4);
+
+            // write newmem
+            Kernel32.WriteBytes(Handle, newmem, asm);
+
+            // write hook
+            Kernel32.WriteBytes(Handle, hookAddress, hook);
+
+            return newmem;
+        }
+
+        /// <summary>
+        /// Removes hook at specified address and frees allocated memory
+        /// </summary>
+        public void RemoveHook(byte[] originalBytes, IntPtr hookAddress, IntPtr allocatedMemory)
+        {
+            Kernel32.WriteBytes(Handle, hookAddress, originalBytes);
+            Free(allocatedMemory);
+            uint error = Kernel32.GetLastError();
         }
 
         /// <summary>

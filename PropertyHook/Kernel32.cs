@@ -89,6 +89,8 @@ namespace PropertyHook
         [DllImport("kernel32.dll")]
         public static extern bool WriteProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, IntPtr nSize, IntPtr lpNumberOfBytesWritten);
 
+        [DllImport("kernel32.dll")]
+        public static extern uint GetLastError();
 
         public static byte[] ReadBytes(IntPtr handle, IntPtr address, uint length)
         {

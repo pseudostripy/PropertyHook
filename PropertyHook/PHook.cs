@@ -2,7 +2,9 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 
 namespace PropertyHook
@@ -59,6 +61,13 @@ namespace PropertyHook
 
         private Func<Process, bool> Selector;
         private List<PHPointerAOB> AOBPointers;
+        /// <summary>
+        /// Starts a thread that automatically checks for new processes to hook.
+        /// </summary>
+        public List<PHPointerAOB> GetPointers()
+        {
+            return AOBPointers;
+        }
         private Thread RefreshThread;
         private CancellationTokenSource RefreshCancellationSource;
 
@@ -76,6 +85,7 @@ namespace PropertyHook
             AOBPointers = new List<PHPointerAOB>();
             RefreshThread = null;
             RefreshCancellationSource = null;
+            Kernel32.GetSystemInfo(ref Kernel32.SystemInfo);
         }
 
         /// <summary>
@@ -126,6 +136,9 @@ namespace PropertyHook
                 bool cleanup = false;
                 foreach (Process process in Process.GetProcesses())
                 {
+                    if (process.MainWindowTitle == "DARK SOULS II")
+                        Console.WriteLine();
+
                     bool close = false;
                     bool is64Bit = false;
                     try
@@ -280,95 +293,37 @@ namespace PropertyHook
         /// </summary>
         public IntPtr Allocate(uint size, uint flProtect = Kernel32.PAGE_READWRITE)
         {
-            return Kernel32.VirtualAllocEx(Handle, IntPtr.Zero, (IntPtr)size, Kernel32.MEM_COMMIT | Kernel32.MEM_RESERVE, flProtect);
+            return Kernel32.VirtualAllocEx(Handle, IntPtr.Zero, (IntPtr)size, Kernel32.MEM_COMMIT, flProtect);
         }
-
         /// <summary>
-        /// Finds an unallocated memory region within a 4gb range of the given address and allocates it with the given size and permissions.
-        /// Returns the address of the allocation, or IntPtr.Zero if allocation fails.
+        /// Get's a pointer allocated in near the process image.  
         /// </summary>
-        /// https://stackoverflow.com/questions/24890451/getting-the-nearest-free-memory-virtualallocex
-        public IntPtr AllocateNearbyMemory(IntPtr nearThisAddress, IntPtr size, uint flprotect)
+        public IntPtr GetPrefferedIntPtr(int size, uint flProtect = Kernel32.PAGE_READWRITE)
         {
-            IntPtr begin = nearThisAddress - 0x7FFF0000;
-            IntPtr end = nearThisAddress + 0x7FFF0000;
-            IntPtr curr = begin;
-            Kernel32.MEMORY_BASIC_INFORMATION mbi = new Kernel32.MEMORY_BASIC_INFORMATION();
-
-            for (; curr.ToInt64() < end.ToInt64(); curr = new IntPtr(curr.ToInt64() + 0x1000))// + mbi.RegionSize.ToInt64()))
+            var ptr = IntPtr.Zero;
+            var i = 1;
+            while (ptr == IntPtr.Zero)
             {
-                Kernel32.VirtualQueryEx(Handle, curr, out mbi, (IntPtr)Marshal.SizeOf(mbi));
-                if (mbi.State == Kernel32.MEM_FREE)
-                {
-                    IntPtr addr = Kernel32.VirtualAllocEx(Handle, mbi.BaseAddress, size, Kernel32.MEM_COMMIT | Kernel32.MEM_RESERVE, flprotect);
-                    if (addr != IntPtr.Zero)
-                        return addr;
-                }
+                var distance = Process.MainModule.BaseAddress.ToInt64() - (Kernel32.SystemInfo.dwAllocationGranularity * i);
+                ptr = Kernel32.VirtualAllocEx(Handle, (IntPtr)distance, (IntPtr)size, Kernel32.MEM_RESERVE | Kernel32.MEM_COMMIT, flProtect);
+                i++;
             }
-            /*
-                while (Kernel32.VirtualQueryEx(Handle, curr, out mbi, (IntPtr)Marshal.SizeOf(mbi)) != 0)
-                {
-                    if (mbi.State == Kernel32.MEM_FREE)
-                    {
-                        IntPtr addr = Kernel32.VirtualAllocEx(Handle, mbi.BaseAddress, size, Kernel32.MEM_COMMIT | Kernel32.MEM_RESERVE, flprotect);
-                        if (addr != IntPtr.Zero)
-                            return addr;
-                    }
-                    curr = new IntPtr(curr.ToInt64() + mbi.RegionSize.ToInt64());
-                    if (curr.ToInt64() > end.ToInt64())
-                        break;
-                }
-            */
 
-            return IntPtr.Zero;
+            return ptr;
         }
 
-        /// <summary>
-        /// Writes hook with jump instruction to asm bytes.
-        /// Returns a IntPtr to the memory allocated for the asm bytes.
-        /// </summary>
-        public IntPtr InjectHook(byte[] asm, IntPtr hookAddress, int asmJmpByte)
+        public IntPtr GetPrefferedIntPtr(int size, IntPtr baseAddress, uint flProtect = Kernel32.PAGE_READWRITE)
         {
-            return InjectHook(asm, hookAddress, asmJmpByte, (IntPtr)asm.Length);
-        }
+            var ptr = IntPtr.Zero;
+            var i = 1;
+            while (ptr == IntPtr.Zero)
+            {
+                var distance = baseAddress.ToInt64() - (Kernel32.SystemInfo.dwAllocationGranularity * i);
+                ptr = Kernel32.VirtualAllocEx(Handle, (IntPtr)distance, (IntPtr)size, Kernel32.MEM_RESERVE | Kernel32.MEM_COMMIT, flProtect);
+                i++;
+            }
 
-        /// <summary>
-        /// Writes hook with jump instruction to asm bytes.
-        /// Returns a IntPtr to the memory allocated for the asm bytes.
-        /// </summary>
-        public IntPtr InjectHook(byte[] asm, IntPtr hookAddress, int asmJmpByte, IntPtr size)
-        {
-            IntPtr newmem = AllocateNearbyMemory(hookAddress, size, Kernel32.PAGE_EXECUTE_READWRITE);
-            if (newmem == IntPtr.Zero)
-                return IntPtr.Zero;
-
-            // calculate address for relative jump
-            byte[] newmemJmpBytes = BitConverter.GetBytes(newmem.ToInt64() - hookAddress.ToInt64() - 5);
-
-            byte[] hook = { 0xE9, 0x90, 0x90, 0x90, 0x90, 0x90 };
-            Array.Copy(newmemJmpBytes, 0, hook, 0x1, 4);
-
-            // calculate return jump
-            byte[] hookAddrJmpBytes = BitConverter.GetBytes(hookAddress.ToInt64() - newmem.ToInt64() - asmJmpByte);
-            Array.Copy(hookAddrJmpBytes, 0, asm, asmJmpByte + 1, 4);
-
-            // write newmem
-            Kernel32.WriteBytes(Handle, newmem, asm);
-
-            // write hook
-            Kernel32.WriteBytes(Handle, hookAddress, hook);
-
-            return newmem;
-        }
-
-        /// <summary>
-        /// Removes hook at specified address and frees allocated memory
-        /// </summary>
-        public void RemoveHook(byte[] originalBytes, IntPtr hookAddress, IntPtr allocatedMemory)
-        {
-            Kernel32.WriteBytes(Handle, hookAddress, originalBytes);
-            Free(allocatedMemory);
-            uint error = Kernel32.GetLastError();
+            return ptr;
         }
 
         /// <summary>
@@ -400,6 +355,48 @@ namespace PropertyHook
             uint result = Execute(address, timeout);
             Free(address);
             return result;
+        }
+        /// <summary>
+        /// Injects DLL specified in path.
+        /// </summary>
+        public IntPtr InjectDLL(string path)
+        {
+            var name = Path.GetFileName(path);
+            IntPtr thread;
+            // Commented code from https://codingvision.net/c-inject-a-dll-into-a-process-w-createremotethread
+            // searching for the address of LoadLibraryA and storing it in a pointer
+            //IntPtr loadLibraryAddr = Kernel32.GetProcAddress(Kernel32.GetModuleHandle("kernel32.dll"), "LoadLibraryA");
+            IntPtr loadLibraryAddr = Kernel32.GetProcAddress(Kernel32.GetModuleHandle("kernel32.dll"), "LoadLibraryW");
+
+            // Encode path as bytes
+            IntPtr bytesWritten = IntPtr.Zero;
+            var pathbytes = Encoding.Unicode.GetBytes(path);
+            var nsize = (IntPtr)(pathbytes.Length + 1);
+
+            // alocating some memory on the target process - enough to store the name of the dll
+            // and storing its address in a pointer
+            IntPtr allocMemAddress = Kernel32.VirtualAllocEx(Handle, IntPtr.Zero, nsize, Kernel32.MEM_COMMIT | Kernel32.MEM_RESERVE, Kernel32.PAGE_READWRITE);
+
+            // writing the name of the dll there
+            Kernel32.WriteProcessMemory(Handle, allocMemAddress, pathbytes, nsize, bytesWritten);
+
+            // creating a thread that will call LoadLibraryA with allocMemAddress as argument
+            thread = Kernel32.CreateRemoteThread(Handle, IntPtr.Zero, 0, loadLibraryAddr, allocMemAddress, 0, IntPtr.Zero);
+            Kernel32.WaitForSingleObject(thread, uint.MaxValue);
+
+            var pointer = IntPtr.Zero;
+            while (pointer == IntPtr.Zero)
+            {
+                Process.Refresh();
+                var modules = Process.Modules;
+                foreach (ProcessModule mod in modules)
+                {
+                    if (mod.ModuleName == name)
+                        pointer = mod.BaseAddress;
+                }
+            }
+
+            return pointer;
         }
 
         private void RaiseOnHooked()

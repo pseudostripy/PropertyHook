@@ -224,6 +224,25 @@ namespace PropertyHook
         }
 
         /// <summary>
+        /// Create and register a new AOB pointer to a module offset.
+        /// </summary>
+        public PHPointer RegisterAbsOffsetsAOB(byte?[] aob, int addressOffset, params int[] offsets)
+        {
+            var pointer = new PHPointerAOBAbsOffsets(this, aob, addressOffset, offsets);
+            AOBPointers.Add(pointer);
+            return pointer;
+        }
+
+        /// <summary>
+        /// Create and register a new AOB pointer to a module offset using a CE string.
+        /// </summary>
+        public PHPointer RegisterAbsOffsetsAOB(string aob, int addressOffset, params int[] offsets)
+        {
+            return RegisterAbsOffsetsAOB(AOBScanner.StringToAOB(aob), addressOffset, offsets);
+        }
+        
+
+        /// <summary>
         /// Creates and registers a new absolute AOB pointer.
         /// </summary>
         public PHPointer RegisterAbsoluteAOB(byte?[] aob, params int[] offsets)

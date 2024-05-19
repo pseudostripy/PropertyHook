@@ -43,6 +43,7 @@
     <Compile Include="PHPointer\PHPointer.cs" />
     <Compile Include="PHook.cs" />
     <Compile Include="PHPointer\PHPointerAOB.cs" />
+    <Compile Include="PHPointer\PHPointerAOBAbsOffsets.cs" />
     <Compile Include="PHPointer\PHPointerAOBAbsolute.cs" />
     <Compile Include="PHPointer\PHPointerAOBRelative.cs" />
     <Compile Include="PHPointer\PHPointerBase.cs" />

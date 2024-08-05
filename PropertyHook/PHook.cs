@@ -224,7 +224,7 @@ namespace PropertyHook
         }
 
         /// <summary>
-        /// Create and register a new AOB pointer to a module offset.
+        /// Create and register a new AOB pointer to a PROCESS (not module!) offset.
         /// </summary>
         public PHPointer RegisterAbsOffsetsAOB(byte?[] aob, int addressOffset, params int[] offsets)
         {
@@ -234,7 +234,7 @@ namespace PropertyHook
         }
 
         /// <summary>
-        /// Create and register a new AOB pointer to a module offset using a CE string.
+        /// Create and register a new AOB pointer to a PROCESS (not module!) offset using a CE string.
         /// </summary>
         public PHPointer RegisterAbsOffsetsAOB(string aob, int addressOffset, params int[] offsets)
         {

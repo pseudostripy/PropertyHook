@@ -30,7 +30,8 @@ namespace PropertyHook
             }
 
             uint address = Kernel32.ReadUInt32(Hook.Handle, result + AddressOffset);
-            AOBResult = (IntPtr)((ulong)Hook.Process.MainModule.BaseAddress + address);
+            //AOBResult = (IntPtr)((ulong)Hook.Process.MainModule.BaseAddress + address);
+            AOBResult = Kernel32.ReadIntPtr(Hook.Handle, (IntPtr)address, Hook.Is64Bit);
             return true;
         }
     }
